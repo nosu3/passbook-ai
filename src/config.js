@@ -5,10 +5,15 @@ export const CONFIG = {
   CONCURRENCY_LIMIT: 3,
   RENDER_SCALE: 2.0,
   RENDER_QUALITY: 0.8,
-  MODEL_ID: 'gemini-2.5-flash',
-  PDF_JS_URL: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
-  PDF_JS_INTEGRITY: "sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e",
-  PDF_WORKER_URL: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
+  MODEL_ID: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_MODEL_ID) || 'gemini-2.5-flash',
+  MAX_FILE_SIZE_MB: 50,
+  ALLOWED_MIME_TYPES: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+  CARRYOVER_PATTERN: /前頁より繰越|前ページより繰越|繰越残高/,
+  PDF_JS_URL: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  PDF_JS_INTEGRITY: 'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e',
+  PDF_JS_URL_FALLBACK: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+  PDF_WORKER_URL: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  PDF_WORKER_URL_FALLBACK: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
 };
 
 export const nextGid = () => crypto.randomUUID();

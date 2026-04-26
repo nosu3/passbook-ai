@@ -1,10 +1,93 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { Icons } from '../icons.jsx';
 import { Utils } from '../utils.js';
 import { ACCOUNT_CODE_LIST } from '../services.js';
 import { FilterBar } from './FilterBar.jsx';
 import { ConfidenceBadge } from './TableComponents.jsx';
 
+const INPUT_CLS = 'w-full p-1 bg-transparent border border-transparent group-hover:border-slate-200 focus:border-blue-400 focus:bg-white rounded outline-none text-xs';
+
+const RECONCILE_TAGS = [
+  { v: 'timing',      label: 'T差',  title: 'タイミング差異', cls: 'bg-sky-100 text-sky-700' },
+  { v: 'adjustment',  label: '調整', title: '調整仕訳必要',   cls: 'bg-orange-100 text-orange-700' },
+  { v: 'investigate', label: '調査', title: '要調査',         cls: 'bg-purple-100 text-purple-700' },
+];
+
+// ─── Memoized row ─────────────────────────────────────────────────────────────
+const TableRow = memo(({ row, isActive, onRowActive, onPageChange, onUpdateData, onAddRow, onDeleteRow, setRef, onTableFocus }) => {
+  const rowBg = isActive
+    ? 'bg-blue-100/60 shadow-[inset_4px_0_0_#3b82f6]'
+    : (row._balanceIssue || row._carryoverIssue) ? 'bg-red-50/50'
+    : row._duplicateIssue ? 'bg-orange-50/40'
+    : row._pageGapWarning ? 'bg-violet-50/40'
+    : row._materialityFlag ? 'bg-amber-50/30'
+    : row.needsReview ? 'bg-amber-50/50'
+    : row.isManual ? 'bg-purple-50/30'
+    : 'bg-white hover:bg-slate-50';
+
+  const handleFocus = useCallback(() => {
+    onRowActive(row.globalIndex);
+    onPageChange(row.pageIndex);
+  }, [row.globalIndex, row.pageIndex, onRowActive, onPageChange]);
+
+  const handleClick = useCallback(() => {
+    onRowActive(row.globalIndex);
+    onPageChange(row.pageIndex);
+    onTableFocus();
+  }, [row.globalIndex, row.pageIndex, onRowActive, onPageChange, onTableFocus]);
+
+  return (
+    <tr
+      ref={el => setRef(row.globalIndex, el)}
+      onClick={handleClick}
+      className={`group transition-colors border-b border-slate-100 cursor-pointer ${rowBg}`}
+    >
+      <td className="p-1.5 text-center text-slate-400 font-bold text-xs">{row.pageIndex + 1}</td>
+      <td className="p-1"><input value={row.bankName || ''} onChange={e => onUpdateData(row.globalIndex, 'bankName', e.target.value)} onFocus={handleFocus} aria-label="金融機関" className={`${INPUT_CLS} font-bold`} /></td>
+      <td className="p-1"><input value={row.date || ''} onChange={e => onUpdateData(row.globalIndex, 'date', e.target.value)} onFocus={handleFocus} aria-label="日付" className={`${INPUT_CLS} font-mono text-slate-600`} /></td>
+      <td className="p-1"><input value={row.description || ''} onChange={e => onUpdateData(row.globalIndex, 'description', e.target.value)} onFocus={handleFocus} aria-label="摘要" className={`${INPUT_CLS} font-bold text-slate-800`} title={row.note} /></td>
+      <td className="p-1"><input value={row.accountCode || ''} onChange={e => onUpdateData(row.globalIndex, 'accountCode', e.target.value)} onFocus={handleFocus} list="account-code-list" aria-label="科目" className={`${INPUT_CLS} text-slate-600`} placeholder="科目…" /></td>
+      <td className="p-1"><input value={row.withdrawal || ''} onChange={e => onUpdateData(row.globalIndex, 'withdrawal', e.target.value)} onFocus={handleFocus} aria-label="出金" className={`${INPUT_CLS} text-right text-red-600 font-mono`} /></td>
+      <td className="p-1"><input value={row.deposit || ''} onChange={e => onUpdateData(row.globalIndex, 'deposit', e.target.value)} onFocus={handleFocus} aria-label="入金" className={`${INPUT_CLS} text-right text-green-600 font-mono`} /></td>
+      <td className="p-1"><input value={row.balance || ''} onChange={e => onUpdateData(row.globalIndex, 'balance', e.target.value)} onFocus={handleFocus} aria-label="残高" className={`${INPUT_CLS} text-right font-black ${row._balanceIssue ? 'text-red-600' : 'text-slate-800'}`} /></td>
+      <td className="p-1 text-center"><ConfidenceBadge score={row.confidenceScore} /></td>
+      <td className="p-1">
+        <div className="flex flex-col gap-0.5 items-center">
+          {row._balanceIssue    && <span title={row._balanceIssue}    className="px-1 py-0.5 rounded text-[9px] font-black bg-red-100 text-red-600 cursor-help whitespace-nowrap">残高!</span>}
+          {row._carryoverIssue  && <span title={row._carryoverIssue}  className="px-1 py-0.5 rounded text-[9px] font-black bg-red-100 text-red-600 cursor-help whitespace-nowrap">繰越!</span>}
+          {row._duplicateIssue  && <span title="同日・同額・同摘要の重複があります" className="px-1 py-0.5 rounded text-[9px] font-black bg-orange-100 text-orange-600 whitespace-nowrap">重複</span>}
+          {row._pageGapWarning  && <span title={row._pageGapWarning}  className="px-1 py-0.5 rounded text-[9px] font-black bg-violet-100 text-violet-600 cursor-help whitespace-nowrap">欠落</span>}
+          {row._materialityFlag && <span title="重要性閾値を超える金額" className="px-1 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-700 whitespace-nowrap">大口</span>}
+          {row.needsReview      && <span className="px-1 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-600 whitespace-nowrap">要確認</span>}
+          {row.isManual         && <span className="px-1 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-600 whitespace-nowrap">追加</span>}
+          {!row._balanceIssue && !row._carryoverIssue && !row._duplicateIssue && !row._pageGapWarning && !row.needsReview && !row.isManual && <span title="問題なし" className="text-emerald-500 text-xs">✓</span>}
+        </div>
+      </td>
+      <td className="p-1 no-print">
+        <div className="flex items-center justify-center gap-0.5">
+          {RECONCILE_TAGS.map(tag => (
+            <button key={tag.v}
+              onClick={e => { e.stopPropagation(); onUpdateData(row.globalIndex, 'reconcileTag', row.reconcileTag === tag.v ? null : tag.v); }}
+              title={tag.title}
+              aria-label={tag.title}
+              aria-pressed={row.reconcileTag === tag.v}
+              className={`px-1 py-0.5 rounded text-[9px] font-black transition-colors ${row.reconcileTag === tag.v ? tag.cls + ' ring-1 ring-inset ring-current' : 'opacity-30 hover:opacity-80 bg-slate-100 text-slate-600'}`}
+            >{tag.label}</button>
+          ))}
+        </div>
+      </td>
+      <td className="p-1 no-print">
+        <div className="flex items-center justify-center gap-0.5">
+          <button onClick={e => { e.stopPropagation(); onAddRow(row.globalIndex); }} aria-label="この行の下に追加" title="この行の下に追加" className="p-1 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-700"><Icons.Plus className="w-3.5 h-3.5" /></button>
+          <button onClick={e => { e.stopPropagation(); onDeleteRow(row.globalIndex); }} aria-label="削除" title="削除" className="p-1 hover:bg-red-100 rounded text-slate-400 hover:text-red-500"><Icons.Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
+      </td>
+    </tr>
+  );
+});
+TableRow.displayName = 'TableRow';
+
+// ─── Main table ───────────────────────────────────────────────────────────────
 export const ResultTable = ({ data, activeIndex, onRowActive, onPageChange, onUpdateData, onAddRow, onDeleteRow, canUndo, canRedo, onUndo, onRedo }) => {
   const tableRef = useRef(null);
   const rowRefs = useRef({});
@@ -12,6 +95,9 @@ export const ResultTable = ({ data, activeIndex, onRowActive, onPageChange, onUp
   const [monthlyView, setMonthlyView] = useState(false);
 
   useEffect(() => { setFilteredData(data); }, [data]);
+
+  const setRef = useCallback((id, el) => { rowRefs.current[id] = el; }, []);
+  const handleTableFocus = useCallback(() => tableRef.current?.focus(), []);
 
   const handleKeyDown = useCallback((e) => {
     if (e.target.tagName === 'INPUT') {
@@ -89,8 +175,6 @@ export const ResultTable = ({ data, activeIndex, onRowActive, onPageChange, onUp
     return result;
   }, [monthlyView, monthlyRows, filteredData]);
 
-  const inputCls = 'w-full p-1 bg-transparent border border-transparent group-hover:border-slate-200 focus:border-blue-400 focus:bg-white rounded outline-none text-xs';
-
   return (
     <div
       ref={tableRef}
@@ -106,24 +190,24 @@ export const ResultTable = ({ data, activeIndex, onRowActive, onPageChange, onUp
         <div className="flex items-center gap-1.5 flex-wrap">
           {reviewCount > 0 && (
             <button onClick={jumpToNextReview} title="次の要確認へジャンプ" className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-xs font-black hover:bg-amber-100">
-              <Icons.SkipForward className="w-3.5 h-3.5"/> 次の要確認
+              <Icons.SkipForward className="w-3.5 h-3.5" /> 次の要確認
             </button>
           )}
           <button onClick={onUndo} disabled={!canUndo} aria-label="元に戻す (Ctrl+Z)" title="元に戻す (Ctrl+Z)" className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-30 transition-opacity">
-            <Icons.Undo2 className="w-4 h-4 text-slate-600"/>
+            <Icons.Undo2 className="w-4 h-4 text-slate-600" />
           </button>
           <button onClick={onRedo} disabled={!canRedo} aria-label="やり直す (Ctrl+Y)" title="やり直す (Ctrl+Y)" className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-30 transition-opacity">
-            <Icons.Redo2 className="w-4 h-4 text-slate-600"/>
+            <Icons.Redo2 className="w-4 h-4 text-slate-600" />
           </button>
           <span className="text-xs text-slate-400 font-bold hidden md:block bg-white px-2 py-1 rounded border no-print">↑↓ 移動 · Enter 次行</span>
           <button onClick={() => setMonthlyView(v => !v)} title="月次集計表示" className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black no-print transition-colors ${monthlyView ? 'bg-indigo-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}>
             月別
           </button>
           <button onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-black no-print">
-            <Icons.Print className="w-3.5 h-3.5"/> 印刷
+            <Icons.Print className="w-3.5 h-3.5" /> 印刷
           </button>
           <button onClick={() => Utils.downloadCSV(filteredData)} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-black no-print">
-            <Icons.Download className="w-3.5 h-3.5"/> CSV
+            <Icons.Download className="w-3.5 h-3.5" /> CSV
           </button>
         </div>
       </div>
@@ -131,7 +215,7 @@ export const ResultTable = ({ data, activeIndex, onRowActive, onPageChange, onUp
       <FilterBar data={data} onFiltered={setFilteredData} />
       <div className="flex-1 overflow-auto custom-scrollbar bg-slate-50/30">
         <datalist id="account-code-list">
-          {ACCOUNT_CODE_LIST.map(c => <option key={c} value={c}/>)}
+          {ACCOUNT_CODE_LIST.map(c => <option key={c} value={c} />)}
         </datalist>
         <table className="w-full text-xs text-left border-collapse">
           <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-30 shadow-sm border-b border-slate-200">
@@ -151,14 +235,14 @@ export const ResultTable = ({ data, activeIndex, onRowActive, onPageChange, onUp
             </tr>
           </thead>
           <tbody>
-            {displayRows.map((row, idx) => {
+            {displayRows.map((row) => {
               if (row._isGroupHeader) {
                 return (
                   <tr key={`grp-${row.month}`} className="bg-indigo-50 border-y border-indigo-200">
                     <td colSpan={4} className="p-2 font-black text-indigo-700 text-xs">
                       📅 {row.month} — {row.count}件
                     </td>
-                    <td className="p-2"/>
+                    <td className="p-2" />
                     <td className="p-2 text-right font-black text-red-600 text-xs">-¥{row.withdrawal.toLocaleString()}</td>
                     <td className="p-2 text-right font-black text-emerald-600 text-xs">+¥{row.deposit.toLocaleString()}</td>
                     <td colSpan={5} className="p-2 text-xs text-indigo-500 font-bold">
@@ -167,69 +251,19 @@ export const ResultTable = ({ data, activeIndex, onRowActive, onPageChange, onUp
                   </tr>
                 );
               }
-              const row2 = row;
-              const isActive = activeIndex === row2.globalIndex;
-              const rowBg = isActive
-                ? 'bg-blue-100/60 shadow-[inset_4px_0_0_#3b82f6]'
-                : (row2._balanceIssue || row2._carryoverIssue) ? 'bg-red-50/50'
-                : row2._duplicateIssue ? 'bg-orange-50/40'
-                : row2._pageGapWarning ? 'bg-violet-50/40'
-                : row2._materialityFlag ? 'bg-amber-50/30'
-                : row2.needsReview ? 'bg-amber-50/50'
-                : row2.isManual ? 'bg-purple-50/30'
-                : 'bg-white hover:bg-slate-50';
               return (
-                <tr
-                  key={row2.globalIndex}
-                  ref={el => rowRefs.current[row2.globalIndex] = el}
-                  onClick={() => { onRowActive(row2.globalIndex); onPageChange(row2.pageIndex); tableRef.current?.focus(); }}
-                  className={`group transition-colors border-b border-slate-100 cursor-pointer ${rowBg}`}
-                >
-                  <td className="p-1.5 text-center text-slate-400 font-bold text-xs">{row2.pageIndex + 1}</td>
-                  <td className="p-1"><input value={row2.bankName || ''} onChange={e => onUpdateData(row2.globalIndex, 'bankName', e.target.value)} onFocus={() => { onRowActive(row2.globalIndex); onPageChange(row2.pageIndex); }} aria-label="金融機関" className={`${inputCls} font-bold`} /></td>
-                  <td className="p-1"><input value={row2.date || ''} onChange={e => onUpdateData(row2.globalIndex, 'date', e.target.value)} onFocus={() => { onRowActive(row2.globalIndex); onPageChange(row2.pageIndex); }} aria-label="日付" className={`${inputCls} font-mono text-slate-600`} /></td>
-                  <td className="p-1"><input value={row2.description || ''} onChange={e => onUpdateData(row2.globalIndex, 'description', e.target.value)} onFocus={() => { onRowActive(row2.globalIndex); onPageChange(row2.pageIndex); }} aria-label="摘要" className={`${inputCls} font-bold text-slate-800`} title={row2.note} /></td>
-                  <td className="p-1"><input value={row2.accountCode || ''} onChange={e => onUpdateData(row2.globalIndex, 'accountCode', e.target.value)} onFocus={() => { onRowActive(row2.globalIndex); onPageChange(row2.pageIndex); }} list="account-code-list" aria-label="科目" className={`${inputCls} text-slate-600`} placeholder="科目…"/></td>
-                  <td className="p-1"><input value={row2.withdrawal || ''} onChange={e => onUpdateData(row2.globalIndex, 'withdrawal', e.target.value)} onFocus={() => { onRowActive(row2.globalIndex); onPageChange(row2.pageIndex); }} aria-label="出金" className={`${inputCls} text-right text-red-600 font-mono`} /></td>
-                  <td className="p-1"><input value={row2.deposit || ''} onChange={e => onUpdateData(row2.globalIndex, 'deposit', e.target.value)} onFocus={() => { onRowActive(row2.globalIndex); onPageChange(row2.pageIndex); }} aria-label="入金" className={`${inputCls} text-right text-green-600 font-mono`} /></td>
-                  <td className="p-1"><input value={row2.balance || ''} onChange={e => onUpdateData(row2.globalIndex, 'balance', e.target.value)} onFocus={() => { onRowActive(row2.globalIndex); onPageChange(row2.pageIndex); }} aria-label="残高" className={`${inputCls} text-right font-black ${row2._balanceIssue ? 'text-red-600' : 'text-slate-800'}`} /></td>
-                  <td className="p-1 text-center"><ConfidenceBadge score={row2.confidenceScore}/></td>
-                  <td className="p-1">
-                    <div className="flex flex-col gap-0.5 items-center">
-                      {row2._balanceIssue && <span title={row2._balanceIssue} className="px-1 py-0.5 rounded text-[9px] font-black bg-red-100 text-red-600 cursor-help whitespace-nowrap">残高!</span>}
-                      {row2._carryoverIssue && <span title={row2._carryoverIssue} className="px-1 py-0.5 rounded text-[9px] font-black bg-red-100 text-red-600 cursor-help whitespace-nowrap">繰越!</span>}
-                      {row2._duplicateIssue && <span title="同日・同額・同摘要の重複があります" className="px-1 py-0.5 rounded text-[9px] font-black bg-orange-100 text-orange-600 whitespace-nowrap">重複</span>}
-                      {row2._pageGapWarning && <span title={row2._pageGapWarning} className="px-1 py-0.5 rounded text-[9px] font-black bg-violet-100 text-violet-600 cursor-help whitespace-nowrap">欠落</span>}
-                      {row2._materialityFlag && <span title="重要性閾値を超える金額" className="px-1 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-700 whitespace-nowrap">大口</span>}
-                      {row2.needsReview && <span className="px-1 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-600 whitespace-nowrap">要確認</span>}
-                      {row2.isManual && <span className="px-1 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-600 whitespace-nowrap">追加</span>}
-                      {!row2._balanceIssue && !row2._carryoverIssue && !row2._duplicateIssue && !row2._pageGapWarning && !row2.needsReview && !row2.isManual && <span title="問題なし" className="text-emerald-500 text-xs">✓</span>}
-                    </div>
-                  </td>
-                  <td className="p-1 no-print">
-                    <div className="flex items-center justify-center gap-0.5">
-                      {[
-                        { v: 'timing',      label: 'T差',  title: 'タイミング差異', cls: 'bg-sky-100 text-sky-700' },
-                        { v: 'adjustment',  label: '調整', title: '調整仕訳必要',   cls: 'bg-orange-100 text-orange-700' },
-                        { v: 'investigate', label: '調査', title: '要調査',         cls: 'bg-purple-100 text-purple-700' },
-                      ].map(tag => (
-                        <button key={tag.v}
-                          onClick={e => { e.stopPropagation(); onUpdateData(row2.globalIndex, 'reconcileTag', row2.reconcileTag === tag.v ? null : tag.v); }}
-                          title={tag.title}
-                          aria-label={tag.title}
-                          aria-pressed={row2.reconcileTag === tag.v}
-                          className={`px-1 py-0.5 rounded text-[9px] font-black transition-colors ${row2.reconcileTag === tag.v ? tag.cls + ' ring-1 ring-inset ring-current' : 'opacity-30 hover:opacity-80 bg-slate-100 text-slate-600'}`}
-                        >{tag.label}</button>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="p-1 no-print">
-                    <div className="flex items-center justify-center gap-0.5">
-                      <button onClick={e => { e.stopPropagation(); onAddRow(row2.globalIndex); }} aria-label="この行の下に追加" title="この行の下に追加" className="p-1 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-700"><Icons.Plus className="w-3.5 h-3.5"/></button>
-                      <button onClick={e => { e.stopPropagation(); onDeleteRow(row2.globalIndex); }} aria-label="削除" title="削除" className="p-1 hover:bg-red-100 rounded text-slate-400 hover:text-red-500"><Icons.Trash2 className="w-3.5 h-3.5"/></button>
-                    </div>
-                  </td>
-                </tr>
+                <TableRow
+                  key={row.globalIndex}
+                  row={row}
+                  isActive={activeIndex === row.globalIndex}
+                  onRowActive={onRowActive}
+                  onPageChange={onPageChange}
+                  onUpdateData={onUpdateData}
+                  onAddRow={onAddRow}
+                  onDeleteRow={onDeleteRow}
+                  setRef={setRef}
+                  onTableFocus={handleTableFocus}
+                />
               );
             })}
           </tbody>

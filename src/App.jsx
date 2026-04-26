@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Icons } from './icons.jsx';
 import { usePassbookReader } from './usePassbookReader.js';
 import { AccountAliasDialog, SessionManager, NormalizationMaster, SettingsModal, ConfirmDialog } from './components/Dialogs.jsx';
+import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import { DualProgressBar } from './components/TableComponents.jsx';
 import { VerificationViewer } from './components/VerificationViewer.jsx';
 import { ResultTable } from './components/ResultTable.jsx';
@@ -227,12 +228,14 @@ export default function App() {
               />
             </div>
             <div className="print-full-height">
+              <ErrorBoundary>
               <ResultTable
                 data={data} activeIndex={activeIndex}
                 onRowActive={setActiveIndex} onPageChange={setCurrentPage}
                 onUpdateData={updateData} onAddRow={addRowAfter} onDeleteRow={deleteRow}
                 canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
               />
+              </ErrorBoundary>
             </div>
             {loading && (
               <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-50 flex flex-col items-center justify-center rounded-2xl gap-4 no-print">

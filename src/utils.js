@@ -1,3 +1,5 @@
+import { CONFIG } from './config.js';
+
 export const Utils = {
   readFileAsBase64: (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -24,6 +26,17 @@ export const Utils = {
   },
 
   cleanNum: (str) => parseInt(String(str || '').replace(/[^\d-]/g, ''), 10) || 0,
+
+  normDate: (d) => d?.replace(/\//g, '-') ?? '',
+
+  validateFile: (file) => {
+    if (!file) throw new Error('ファイルが選択されていません');
+    const maxBytes = CONFIG.MAX_FILE_SIZE_MB * 1024 * 1024;
+    if (file.size > maxBytes) throw new Error(`ファイルサイズが上限 (${CONFIG.MAX_FILE_SIZE_MB}MB) を超えています`);
+    if (!CONFIG.ALLOWED_MIME_TYPES.includes(file.type)) {
+      throw new Error('非対応のファイル形式です（PDF・JPEG・PNG・WebP のみ対応）');
+    }
+  },
 
   hashFile: async (file) => {
     const buf = await file.arrayBuffer();

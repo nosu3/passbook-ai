@@ -1,5 +1,8 @@
-// Pure validation logic — no React / DOM dependencies
-export const cleanNum = (str) => parseInt(String(str || '').replace(/[^\d-]/g, ''), 10) || 0;
+import { Utils } from './utils.js';
+import { CONFIG } from './config.js';
+
+// Re-export for backwards compatibility with existing tests
+export const cleanNum = Utils.cleanNum;
 
 export const Validators = {
   checkBalanceContinuity: (transactions) => {
@@ -15,10 +18,10 @@ export const Validators = {
     Object.values(grouped).forEach(group => {
       for (let i = 1; i < group.length; i++) {
         const prev = group[i - 1]; const curr = group[i];
-        const prevBal = cleanNum(prev.balance);
-        const currBal = cleanNum(curr.balance);
+        const prevBal = Utils.cleanNum(prev.balance);
+        const currBal = Utils.cleanNum(curr.balance);
         if (!prevBal || !currBal) continue;
-        const expected = prevBal - cleanNum(curr.withdrawal) + cleanNum(curr.deposit);
+        const expected = prevBal - Utils.cleanNum(curr.withdrawal) + Utils.cleanNum(curr.deposit);
         if (Math.abs(expected - currBal) > 1) {
           curr._balanceIssue = `残高不整合: 期待値 ${expected.toLocaleString()} / 実際 ${currBal.toLocaleString()}`;
           curr.note = `${curr.note ? curr.note + ' ' : ''}【残高不整合】期待値:${expected.toLocaleString()} 実際:${currBal.toLocaleString()}`;
@@ -36,7 +39,7 @@ export const Validators = {
     const matched = new Set();
     const depositIndex = new Map();
     result.forEach((t, j) => {
-      const amt = cleanNum(t.deposit);
+      const amt = Utils.cleanNum(t.deposit);
       if (amt <= 0) return;
       const key = `${t.date}_${amt}`;
       if (!depositIndex.has(key)) depositIndex.set(key, []);
@@ -44,7 +47,7 @@ export const Validators = {
     });
     result.forEach((w, i) => {
       if (matched.has(i)) return;
-      const wAmt = cleanNum(w.withdrawal);
+      const wAmt = Utils.cleanNum(w.withdrawal);
       if (wAmt <= 0) return;
       const candidates = depositIndex.get(`${w.date}_${wAmt}`) || [];
       const matchIdx = candidates.find(j => j !== i && !matched.has(j));
@@ -79,7 +82,6 @@ export const Validators = {
 
   checkCarryover: (transactions) => {
     const result = transactions.map(t => ({ ...t, _carryoverIssue: null }));
-    const CARRYOVER_RX = /前頁より繰越|前ページより繰越|繰越残高/;
     const bankGroups = {};
     result.forEach(t => {
       const k = t.bankName || '';
@@ -93,12 +95,12 @@ export const Validators = {
       for (let pi = 1; pi < pages.length; pi++) {
         const prevRows = pageMap[pages[pi - 1]];
         const currRows = pageMap[pages[pi]];
-        const prevLast = [...prevRows].reverse().find(t => cleanNum(t.balance) !== 0);
+        const prevLast = [...prevRows].reverse().find(t => Utils.cleanNum(t.balance) !== 0);
         if (!prevLast) continue;
-        const carryRow = currRows.find(t => CARRYOVER_RX.test(t.description || ''));
+        const carryRow = currRows.find(t => CONFIG.CARRYOVER_PATTERN.test(t.description || ''));
         if (!carryRow) continue;
-        const prevBal = cleanNum(prevLast.balance);
-        const carryBal = cleanNum(carryRow.balance);
+        const prevBal = Utils.cleanNum(prevLast.balance);
+        const carryBal = Utils.cleanNum(carryRow.balance);
         if (Math.abs(prevBal - carryBal) > 1) {
           carryRow._carryoverIssue = `繰越不整合: 前頁末残 ${prevBal.toLocaleString()} / 繰越額 ${carryBal.toLocaleString()}`;
         }
@@ -111,7 +113,7 @@ export const Validators = {
     if (!threshold || threshold <= 0) return transactions.map(t => ({ ...t, _materialityFlag: false }));
     return transactions.map(t => ({
       ...t,
-      _materialityFlag: cleanNum(t.withdrawal) >= threshold || cleanNum(t.deposit) >= threshold
+      _materialityFlag: Utils.cleanNum(t.withdrawal) >= threshold || Utils.cleanNum(t.deposit) >= threshold
     }));
   },
 
@@ -122,8 +124,8 @@ export const Validators = {
     Object.values(grouped).forEach(group => {
       const withDate = group.filter(t => t.date);
       for (let i = 1; i < withDate.length; i++) {
-        const d1 = new Date(withDate[i-1].date.replace(/\//g, '-'));
-        const d2 = new Date(withDate[i].date.replace(/\//g, '-'));
+        const d1 = new Date(Utils.normDate(withDate[i-1].date));
+        const d2 = new Date(Utils.normDate(withDate[i].date));
         if (isNaN(d1) || isNaN(d2)) continue;
         const gap = (d2 - d1) / 86400000;
         if (gap > 40) withDate[i]._pageGapWarning = `前取引から${Math.round(gap)}日間のデータ欠落の可能性`;

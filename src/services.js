@@ -1,6 +1,18 @@
 import { CONFIG, PROMPT_TEMPLATE } from './config.js';
 import { Utils } from './utils.js';
 
+// ─── Shared localStorage wrapper ─────────────────────────────────────────────
+const safeStorage = {
+  get: (key, fallback) => {
+    try { return JSON.parse(localStorage.getItem(key) ?? 'null') ?? fallback; }
+    catch { return fallback; }
+  },
+  set: (key, value) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+    catch { return false; }
+  },
+};
+
 // ─── Account pattern learning ────────────────────────────────────────────────
 export const ACCOUNT_CODE_LIST = [
   '普通預金','当座預金','現金','売掛金','未収入金','前払費用','仮払金',
@@ -11,11 +23,13 @@ export const ACCOUNT_CODE_LIST = [
 ];
 
 export const AccountPatterns = {
-  load: () => { try { return JSON.parse(localStorage.getItem('account_patterns_v1') || '{}'); } catch { return {}; } },
-  save: (p) => { try { localStorage.setItem('account_patterns_v1', JSON.stringify(p)); } catch {} },
+  load: () => safeStorage.get('account_patterns_v1', {}),
+  save: (p) => safeStorage.set('account_patterns_v1', p),
   learn: (desc, code) => {
     if (!desc?.trim() || !code?.trim()) return;
-    const p = AccountPatterns.load(); p[desc.trim()] = code.trim(); AccountPatterns.save(p);
+    const p = AccountPatterns.load();
+    p[desc.trim()] = code.trim();
+    AccountPatterns.save(p);
   },
   apply: (transactions) => {
     const p = AccountPatterns.load();
@@ -25,13 +39,14 @@ export const AccountPatterns = {
 
 // ─── Description normalization ───────────────────────────────────────────────
 export const NormalizationRules = {
-  load: () => { try { return JSON.parse(localStorage.getItem('normalization_rules_v1') || '[]'); } catch { return []; } },
-  save: (rules) => { try { localStorage.setItem('normalization_rules_v1', JSON.stringify(rules)); } catch {} },
+  load: () => safeStorage.get('normalization_rules_v1', []),
+  save: (rules) => safeStorage.set('normalization_rules_v1', rules),
   applyOne: (desc, rules) => {
     let result = desc || '';
     for (const r of rules) {
       if (!r.pattern) continue;
-      try { result = result.replace(new RegExp(r.pattern, 'g'), r.replacement || ''); } catch {}
+      try { result = result.replace(new RegExp(r.pattern, 'g'), r.replacement || ''); }
+      catch { /* invalid regex — skip */ }
     }
     return result;
   },
@@ -43,40 +58,50 @@ export const NormalizationRules = {
 };
 
 // ─── Session persistence ─────────────────────────────────────────────────────
+const SESSION_KEY = 'passbook_sessions_v1';
+const SESSION_LIMIT = 20;
+
 export const SessionService = {
-  list: () => { try { return JSON.parse(localStorage.getItem('passbook_sessions_v1') || '[]'); } catch { return []; } },
+  list: () => safeStorage.get(SESSION_KEY, []),
   save: (name, data) => {
     const sessions = SessionService.list();
     const idx = sessions.findIndex(s => s.name === name);
     const entry = { name, data, savedAt: new Date().toISOString() };
     if (idx >= 0) sessions[idx] = entry; else sessions.unshift(entry);
-    try { localStorage.setItem('passbook_sessions_v1', JSON.stringify(sessions.slice(0, 20))); } catch {}
+    safeStorage.set(SESSION_KEY, sessions.slice(0, SESSION_LIMIT));
   },
   load: (name) => SessionService.list().find(s => s.name === name)?.data ?? null,
-  delete: (name) => {
-    try { localStorage.setItem('passbook_sessions_v1', JSON.stringify(SessionService.list().filter(s => s.name !== name))); } catch {}
-  },
+  delete: (name) => safeStorage.set(SESSION_KEY, SessionService.list().filter(s => s.name !== name)),
 };
 
 // ─── PDF rendering ───────────────────────────────────────────────────────────
+const loadScript = (url, integrity) => new Promise((resolve, reject) => {
+  const s = document.createElement('script');
+  s.src = url;
+  if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
+  s.onload = resolve;
+  s.onerror = reject;
+  document.body.appendChild(s);
+});
+
 export const PdfService = {
   load: async (onProgress) => {
     if (window.pdfjsLib) return;
     onProgress?.('PDFエンジンを起動中...');
-    return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = CONFIG.PDF_JS_URL;
-      s.integrity = CONFIG.PDF_JS_INTEGRITY;
-      s.crossOrigin = 'anonymous';
-      s.onload = async () => {
-        try {
-          const text = await (await fetch(CONFIG.PDF_WORKER_URL)).text();
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
-        } catch { /* fallback */ }
-        resolve();
-      };
-      s.onerror = reject; document.body.appendChild(s);
-    });
+    try {
+      await loadScript(CONFIG.PDF_JS_URL, CONFIG.PDF_JS_INTEGRITY);
+    } catch {
+      await loadScript(CONFIG.PDF_JS_URL_FALLBACK, null);
+    }
+    try {
+      const workerText = await (await fetch(CONFIG.PDF_WORKER_URL)).text();
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([workerText], { type: 'text/javascript' }));
+    } catch {
+      try {
+        const workerText = await (await fetch(CONFIG.PDF_WORKER_URL_FALLBACK)).text();
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([workerText], { type: 'text/javascript' }));
+      } catch { /* use default worker */ }
+    }
   },
 
   extractImagesStreaming: async (file, onPageReady, onProgress) => {
@@ -130,23 +155,32 @@ export const GeminiService = {
         }
       }
     };
+
     let delay = 1000;
     for (let attempt = 0; attempt < 5; attempt++) {
       const ctrl = new AbortController();
       const tid = setTimeout(() => ctrl.abort(), CONFIG.API_TIMEOUT_MS);
       try {
-        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify(payload), signal: ctrl.signal });
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal
+        });
         clearTimeout(tid);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (res.status === 400) throw new Error('APIキーが無効です。設定を確認してください');
+        if (res.status === 429) throw new Error('API利用制限に達しました。しばらく待ってから再試行してください');
+        if (!res.ok) throw new Error(`APIエラー (HTTP ${res.status})`);
         const json = await res.json();
         const candidate = json.candidates?.[0];
-        if (!candidate || candidate.finishReason === 'SAFETY') throw new Error('API応答エラー');
+        if (!candidate || candidate.finishReason === 'SAFETY') throw new Error('AI応答エラー: 安全フィルターによりブロックされました');
         let text = candidate.content?.parts?.[0]?.text?.trim() || '{}';
         if (text.startsWith('\x60')) text = text.replace(/^[\x60]{3}(?:json)?\s*/i, '').replace(/\s*[\x60]{3}$/i, '');
         return JSON.parse(text);
       } catch (err) {
         clearTimeout(tid);
         if (attempt === 4) throw err;
+        if (err.name === 'AbortError') throw new Error('APIタイムアウト: ネットワーク接続を確認してください');
         await new Promise(r => setTimeout(r, delay)); delay *= 2;
       }
     }
